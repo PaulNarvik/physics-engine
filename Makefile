@@ -1,41 +1,96 @@
-# Variables
-CXX = g++
-CXXFLAGS = -std=c++17 -Wall -Wextra -Iinclude
-SRC_DIR = src
-INCLUDE_DIR = include
-BUILD_DIR = build
-OBJ_DIR = $(BUILD_DIR)/obj
-BIN_DIR = $(BUILD_DIR)/bin
-TARGET = $(BIN_DIR)/physics_engine
+# ==============================================================
+# Makefile pour physics-engine + SDL3 (Linux)
+# ==============================================================
 
-# Trouver tous les fichiers .cpp
-SOURCES = $(shell find $(SRC_DIR) -name '*.cpp')
-OBJECTS = $(SOURCES:$(SRC_DIR)/%.cpp=$(OBJ_DIR)/%.o)
+# Nom de l'exécutable
+TARGET   := physics-engine
+BUILD    := build
+SRC      := src
+INCLUDE  := include
 
-# La première règle = règle par défaut quand on tape juste "make"
-all: compile run
+# Sources et objets
+SOURCES  := $(wildcard $(SRC)/*.cpp)
+OBJECTS  := $(SOURCES:$(SRC)/%.cpp=$(BUILD)/%.o)
+DEPENDS  := $(OBJECTS:.o=.d)
 
-# Compilation
-compile: $(TARGET)
+# Compilateur et flags de base
+CXX      := g++               # ou clang++
+CXXFLAGS := -std=c++20 -I$(INCLUDE) -Wall -Wextra -Wpedantic
+CXXFLAGS += -Wshadow -Wnon-virtual-dtor -Wold-style-cast -Wcast-align
+CXXFLAGS += -Wconversion -Wsign-conversion -Wnull-dereference
 
-# Lien de l'exécutable
-$(TARGET): $(OBJECTS)
-	@mkdir -p $(BIN_DIR)
-	$(CXX) $(OBJECTS) -o $@
+# Flags SDL3 via pkg-config (la méthode officielle)
+SDL_FLAGS := $(shell pkg-config --cflags sdl3)
+LDLIBS    := $(shell pkg-config --libs sdl3)
 
-# Compilation des .o
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+# Mode Debug par défaut
+CXXFLAGS += -O0 -g3 -DDEBUG
+LDFLAGS  :=
 
-# Exécution du programme (dépend de la compilation)
-run: $(TARGET)
-	@echo "Lancement de $(TARGET)..."
-	./$(TARGET)
+# ==============================================================
+# Règles principales
+# ==============================================================
 
-# Nettoyage
+.PHONY: all clean run asan ubsan tsan release
+
+all: $(BUILD)/$(TARGET)
+
+# Compilation avec AddressSanitizer + UBSan (recommandé en dev !)
+asan: CXXFLAGS += -fsanitize=address,leak -fno-omit-frame-pointer
+asan: LDFLAGS  += -fsanitize=address,leak
+asan: clean all
+
+ubsan: CXXFLAGS += -fsanitize=undefined -fno-omit-frame-pointer
+ubsan: LDFLAGS  += -fsanitize=undefined
+ubsan: clean all
+
+tsan: CXXFLAGS += -fsanitize=thread
+tsan: LDFLAGS  += -fsanitize=thread
+tsan: clean all
+
+# Build optimisée
+release: CXXFLAGS += -O3 -march=native -DNDEBUG
+release: LDFLAGS  += -flto
+release: clean all
+
+# Lier l'exécutable
+$(BUILD)/$(TARGET): $(OBJECTS) | $(BUILD)
+	$(CXX) $(OBJECTS) -o $@ $(LDFLAGS) $(LDLIBS)
+	@echo "Build terminé → $@"
+
+# Compiler les .cpp → .o
+$(BUILD)/%.o: $(SRC)/%.cpp | $(BUILD)
+	$(CXX) $(CXXFLAGS) $(SDL_FLAGS) -MMD -MP -c $< -o $@
+
+# Créer le dossier build s'il n'existe pas
+$(BUILD):
+	mkdir -p $(BUILD)
+
+# Inclure les dépendances automatiques
+-include $(DEPENDS)
+
+# Nettoyer
 clean:
-	rm -rf $(BUILD_DIR)
+	rm -rf $(BUILD)
 
-# Règles qui ne correspondent pas à des fichiers
-.PHONY: all compile run clean
+# Lancer l'exécutable
+run: all
+	./$(BUILD)/$(TARGET)
+
+# ==============================================================
+# Infos
+# ==============================================================
+
+info:
+	@echo "Sources trouvés : $(words $(SOURCES))"
+	@pkg-config --cflags --libs sdl3
+
+help:
+	@echo "Cibles disponibles :"
+	@echo "  all      → build normale (debug)"
+	@echo "  asan     → avec AddressSanitizer + LeakSanitizer (recommandé !)"
+	@echo "  ubsan    → avec UndefinedBehaviorSanitizer"
+	@echo "  tsan     → avec ThreadSanitizer"
+	@echo "  release  → build optimisée (-O3 + LTO)"
+	@echo "  clean    → supprimer build/"
+	@echo "  run      → compiler et lancer"

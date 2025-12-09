@@ -1,0 +1,5 @@
+-isystem/usr/include/SDL3
+-isystem/usr/local/include/SDL3
+-I./include
+-std=c++20
+-DSDL_MAIN_HANDLED
